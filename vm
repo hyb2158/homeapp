@@ -1,0 +1,178 @@
+//#include<stdio.h>
+//
+//void main()
+//{
+//	printf("Hello, World!\n");
+//
+//	printf("haha!\n");
+//}
+
+
+
+#include<stdio.h>
+#include<string.h>
+#include<malloc.h>
+#include<errno.h>
+
+#include<sys/socket.h>
+#include<sys/types.h>
+#include<sys/ioctl.h>
+
+#include<net/if.h>
+#include<netinet/in.h>
+#include<netinet/ip.h>
+#include<netinet/if_ether.h>
+#include<netinet/udp.h>
+
+#include<linux/if_packet.h>
+
+#include<arpa/inet.h>
+
+#include<unistd.h>
+
+
+struct ifreq ifreq_i;
+int sock_raw;
+unsigned char* sendbuff;
+int total_len = 0, send_len;
+
+struct sockaddr_ll sadr_ll;
+
+void send_data_process();
+
+//--------------------------------
+char* eth_dev_name = "ens33";
+int buff_len = 64;
+//--------------------------------
+
+void get_eth_index()
+{
+	memset(&ifreq_i, 0, sizeof(ifreq_i));
+	strncpy(ifreq_i.ifr_name, eth_dev_name, IFNAMSIZ - 1);
+
+	if ((ioctl(sock_raw, SIOCGIFINDEX, &ifreq_i)) < 0)
+		printf("error in index ioctl reading");
+
+	printf("index=%d\n", ifreq_i.ifr_ifindex);
+}
+
+int send_net(unsigned char* sendbuff, int buff_len)
+{
+	int send_len = 0;
+	send_len = sendto(sock_raw, sendbuff, buff_len, 0, (const struct sockaddr*)&sadr_ll, sizeof(struct sockaddr_ll));
+	return send_len;
+}
+
+
+int count = 0;
+
+int main()
+{
+	sock_raw = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW);
+	if (sock_raw == -1)
+		printf("error in socket");
+
+	sendbuff = (unsigned char*)malloc(buff_len); // increase in case of large data.Here data is --> AA  BB  CC  DD  EE
+	memset(sendbuff, 0, buff_len);
+
+	get_eth_index();  // interface number
+
+	sadr_ll.sll_ifindex = ifreq_i.ifr_ifindex;
+	sadr_ll.sll_halen = ETH_ALEN;
+
+	send_data_process();
+}
+
+//===========================================================
+
+
+void buff_init()
+{
+	// Destination MAC Address : 00:01:02:03:04:05
+	//gateway mac address:  38-f4-5e-73-86-1f
+	//broadcasting mac: ff-ff-ff-ff-ff-ff
+
+	sendbuff[0] = 0xFF;
+	sendbuff[1] = 0xFF;
+	sendbuff[2] = 0xFF;
+	sendbuff[3] = 0xFF;
+	sendbuff[4] = 0xFF;
+	sendbuff[5] = 0xFF;
+
+	// Source MAC Address : E4-FD-45-4E-40-D5
+	sendbuff[6] = 0x00; //rinux mac change
+	sendbuff[7] = 0x0c;
+	sendbuff[8] = 0x29;
+	sendbuff[9] = 0x58;
+	sendbuff[10] = 0x38;
+	sendbuff[11] = 0x01;
+
+	// Type = ARP : 0x0806, IP : 0x0800
+	sendbuff[12] = 0x08;
+	sendbuff[13] = 0x06;
+	//------------------------------
+	// ARP Packet
+	// hardware type[1] : protocol type(0x0800)
+	// hardware length (6) : protocol len(4) : Op Code(req:1, res: 2)
+	//send mac address(6 byte : E4-FD-45-4E-40-D5) 
+	// send IP address( 4 byte: 172.30.1.58)
+	/// target mac address: 
+	// target ip address: 
+	sendbuff[14] = 0x00; //hardware type upper
+	sendbuff[15] = 0x01; //hardware type lower
+	sendbuff[16] = 0x08; //protocol type upper
+	sendbuff[17] = 0x00; //protocol type lower
+	sendbuff[18] = 0x06; //hardware length
+	sendbuff[19] = 0x04; //protocol length
+	sendbuff[20] = 0x00; //protocol length
+	sendbuff[21] = 0x01; //protocol length
+
+	sendbuff[22] = 0x00; //linux mac change
+	sendbuff[23] = 0x0c;
+	sendbuff[24] = 0x29;
+	sendbuff[25] = 0x58;
+	sendbuff[26] = 0x38;
+	sendbuff[27] = 0x01;
+
+	sendbuff[28] = 172; ///inux ip
+	sendbuff[29] = 30;
+	sendbuff[30] = 1;
+	sendbuff[31] = 94;
+
+	sendbuff[32] = 0x00; //target
+	sendbuff[33] = 0x00;
+	sendbuff[34] = 0x00;
+	sendbuff[35] = 0x00;
+	sendbuff[36] = 0x00;
+	sendbuff[37] = 0x00;
+
+	sendbuff[38] = 172;
+	sendbuff[39] = 30;
+	sendbuff[40] = 1;
+	sendbuff[41] = 39;
+	//---------------
+	buff_len = 42;
+
+}
+
+
+
+void send_data_process()
+{
+
+	buff_init();
+
+	printf("sending...\n");
+	while (1)
+	{
+		send_len = send_net(sendbuff, buff_len);
+		if (send_len < 0)
+		{
+			printf("sendlen=%d....errno=%d\n", send_len, errno);
+			return -1;
+		}
+
+		printf("count = %d\n", count++);
+		usleep(1000000);
+	}
+}
